@@ -1,6 +1,6 @@
 """Baseline 적재: 최신본 PDF → 페이지 단위 Document → RecursiveCharacterTextSplitter → PGVector.
 
-실행: uv run python -m src.ingest
+실행: uv run python -m src.rag.ingest
 """
 import csv
 from pathlib import Path
@@ -9,9 +9,9 @@ import pymupdf
 from langchain_core.documents import Document
 from langchain_text_splitters import RecursiveCharacterTextSplitter
 
-from src.collect_rules import MANIFEST, safe_name
-from src.convert_latest import PDF_DIR
-from src.store import get_vector_store
+from src.collect.collect_rules import MANIFEST, safe_name
+from src.collect.convert_latest import PDF_DIR
+from src.lib.store import get_vector_store
 
 CHUNK_SIZE = 1000
 CHUNK_OVERLAP = 150

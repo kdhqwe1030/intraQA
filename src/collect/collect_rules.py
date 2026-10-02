@@ -5,7 +5,7 @@ zip 파일은 같은 폴더에 압축을 푼다. 수집 결과는 data/manifest.
 
 ALIO 웹 화면이 내부적으로 쓰는 엔드포인트(공식 Open API 아님)라서 요청 사이에 간격을 둔다.
 
-실행: uv run python -m src.collect_rules 한국지역난방공사
+실행: uv run python -m src.collect.collect_rules 한국지역난방공사
 """
 import csv
 import re

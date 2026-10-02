@@ -1,7 +1,7 @@
 from langchain_openai import OpenAIEmbeddings
 from langchain_postgres import PGVector
 
-from src.config import OPENAI_EMBEDDING_MODEL, pg_url
+from src.lib.config import OPENAI_EMBEDDING_MODEL, pg_url
 
 COLLECTION = "baseline"
 

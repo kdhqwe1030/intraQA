@@ -1,13 +1,13 @@
 """0단계 환경 점검: DB(pgvector), OpenAI, 국가법령정보 API 연결을 한 번씩 확인한다.
 
-실행: uv run python -m src.check_env
+실행: uv run python -m src.lib.check_env
 """
 import os
 
 import psycopg
 import requests
 
-from src.config import LAW_OC, OPENAI_CHAT_MODEL, OPENAI_EMBEDDING_MODEL, pg_url
+from src.lib.config import LAW_OC, OPENAI_CHAT_MODEL, OPENAI_EMBEDDING_MODEL, pg_url
 
 
 def check_db() -> None:

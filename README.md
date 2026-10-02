@@ -11,7 +11,7 @@
 uv sync
 cp .env.example .env        # OPENAI_API_KEY, LAW_OC 입력
 docker compose up -d        # pgvector (localhost:5445)
-uv run python -m src.check_env
+uv run python -m src.lib.check_env
 ```
 
 ## 5. 실행 방법

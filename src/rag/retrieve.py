@@ -1,12 +1,12 @@
 """검색기. 모든 검색은 get_retriever(org)를 거쳐서 기관 필터가 빠지지 않게 한다 (기획서 9-3).
 
-실행: uv run python -m src.retrieve "출장 일비는 얼마인가?"
+실행: uv run python -m src.rag.retrieve "출장 일비는 얼마인가?"
 """
 import sys
 
 from langchain_core.vectorstores import VectorStoreRetriever
 
-from src.store import get_vector_store
+from src.lib.store import get_vector_store
 
 DEFAULT_ORG = "한국지역난방공사"
 TOP_K = 4

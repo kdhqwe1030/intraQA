@@ -3,7 +3,7 @@
 HWP 5.x / HWPX 변환에는 LibreOffice 확장 H2Orestart가 필요하다.
 확장이 없으면 HWP 5.x가 바이너리 그대로 찍힌 깨진 PDF가 나오므로, 변환 결과에 한글이 있는지 검사한다.
 
-실행: uv run python -m src.convert_latest
+실행: uv run python -m src.collect.convert_latest
 """
 import csv
 import re
@@ -14,7 +14,7 @@ from pathlib import Path
 
 import pymupdf
 
-from src.collect_rules import MANIFEST, safe_name
+from src.collect.collect_rules import MANIFEST, safe_name
 
 PDF_DIR = Path("data/pdf")
 SOFFICE = shutil.which("soffice") or "/Applications/LibreOffice.app/Contents/MacOS/soffice"
