@@ -1,0 +1,16 @@
+services:
+  db:
+    image: pgvector/pgvector:pg16
+    container_name: intra-qa-db
+    environment:
+      POSTGRES_USER: ${POSTGRES_USER:-intraqa}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-intraqa}
+      POSTGRES_DB: ${POSTGRES_DB:-intraqa}
+    ports:
+      - "${POSTGRES_PORT:-5445}:5432"   # nl2sql-gate가 5444를 쓰므로 5445
+    volumes:
+      - pgdata:/var/lib/postgresql/data
+      - ./db/init.sql:/docker-entrypoint-initdb.d/init.sql:ro
+
+volumes:
+  pgdata:
