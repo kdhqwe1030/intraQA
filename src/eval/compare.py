@@ -53,8 +53,12 @@ def build(runs: list[str]) -> str:
     header = "| " + " | ".join(runs) + " |"
     divider = "|---" * len(runs) + "|"
 
-    lines = [f"# 평가 비교: {' / '.join(runs)}", "", f"기준: `{base_run}`", "", "## 지표", "",
-             "| 지표 " + header, "|---" + divider]
+    lines = [f"# 평가 비교: {' / '.join(runs)}", "", f"기준: `{base_run}`", "", "## 실행별 결과 파일", "",
+             "| 실행 | 요약 | 원인 분석 | 문항별 상세 |", "|---|---|---|---|"]
+    for run in runs:
+        analysis = f"[analysis.md]({run}/analysis.md)" if (RESULTS_DIR / run / "analysis.md").exists() else "-"
+        lines.append(f"| `{run}` | [summary.md]({run}/summary.md) | {analysis} | [details.csv]({run}/details.csv) |")
+    lines += ["", "## 지표", "", "| 지표 " + header, "|---" + divider]
     per_run = {run: metrics(rows) for run, rows in data.items()}
     for name in per_run[base_run]:
         lines.append(f"| {name} | " + " | ".join(per_run[run][name] for run in runs) + " |")
