@@ -1,4 +1,4 @@
-"""RAG: 검색 → (상위 법령 재검색) → Prompt → LLM. 답변과 출처(규정명·페이지, 법령 조문)를 함께 돌려준다.
+"""RAG: 검색 → Prompt → LLM → (답변이 법령에 넘기면 법령 조회 후 다시 답변). 답변과 출처(규정명·페이지, 법령 조문)를 함께 돌려준다.
 
 실행: uv run python -m src.rag.rag "출산휴가는 며칠 쓸 수 있어?" --pipeline structured_hybrid_law
 """
@@ -63,14 +63,15 @@ def ask(question: str, org: str, k: int = TOP_K, pipeline: str = DEFAULT_PIPELIN
     context = format_context(docs)
     llm = ChatOpenAI(model=OPENAI_CHAT_MODEL, temperature=0)
 
+    answer = (PROMPT | llm | StrOutputParser()).invoke({"org": org, "context": context, "question": question})
+
     law_docs, trace = [], []
     if p.get("law"):
-        law_docs, trace = gather_laws(question, context)
-        answer = (LAW_PROMPT | llm | StrOutputParser()).invoke(
-            {"org": org, "context": context, "laws": format_laws(law_docs), "question": question})
-    else:
-        answer = (PROMPT | llm | StrOutputParser()).invoke(
-            {"org": org, "context": context, "question": question})
+        # 규정 답변이 법령에 넘기고 있으면 법령을 조회해서 다시 답한다. 아니면 규정 답변을 그대로 쓴다
+        law_docs, trace = gather_laws(question, answer, docs)
+        if law_docs:
+            answer = (LAW_PROMPT | llm | StrOutputParser()).invoke(
+                {"org": org, "context": context, "laws": format_laws(law_docs), "question": question})
     return {
         "question": question,
         "answer": answer,
