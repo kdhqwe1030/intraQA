@@ -13,7 +13,9 @@ __pycache__/
 # 개인 문서 / 교재
 docs/
 *.pdf
-!data/**/*.pdf
+
+# 수집 데이터 (src/collect_rules.py, src/convert_latest.py로 재생성)
+data/
 
 # OS / IDE
 .DS_Store

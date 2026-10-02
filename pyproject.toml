@@ -12,6 +12,7 @@ dependencies = [
     "langchain-text-splitters>=1.1.2",
     "pandas>=3.0.6",
     "psycopg[binary]>=3.3.6",
+    "pymupdf>=1.28.2",
     "python-dotenv>=1.2.4",
     "requests>=2.34.2",
 ]
