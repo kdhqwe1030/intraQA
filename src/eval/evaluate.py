@@ -6,7 +6,8 @@
   ③ LLM 채점: 정답 기준과 의미가 맞는가, 검색 문서에 근거하는가
 문서없음 문항은 ①②에서 빼고, 답변을 거절했는지로 판정한다 (교재 14.8).
 
-실행: uv run python -m src.eval.evaluate --run baseline
+실행: uv run python -m src.eval.evaluate --run baseline --method dense
+      uv run python -m src.eval.evaluate --run hybrid --method hybrid
 """
 import argparse
 import csv
@@ -23,7 +24,7 @@ from src.lib.config import OPENAI_CHAT_MODEL, OPENAI_EMBEDDING_MODEL, OPENAI_JUD
 from src.lib.store import COLLECTION
 from src.rag.ingest import CHUNK_OVERLAP, CHUNK_SIZE
 from src.rag.rag import NO_ANSWER, ask
-from src.rag.retrieve import TOP_K
+from src.rag.retrieve import METHODS, TOP_K
 
 QUESTIONS = Path("eval/questions.csv")
 RESULTS_DIR = Path("results")
@@ -105,8 +106,8 @@ def make_judge():
 
 # ---------- 실행 ----------
 
-def evaluate_one(row: dict, judge, k: int) -> dict:
-    result = ask(row["question"], row["org"], k=k)
+def evaluate_one(row: dict, judge, k: int, method: str) -> dict:
+    result = ask(row["question"], row["org"], k=k, method=method)
     docs, answer = result["docs"], result["answer"]
     no_doc = row["question_type"] == NO_DOC_TYPE
 
@@ -138,7 +139,7 @@ def pct(n: int, d: int) -> str:
     return f"{n / d:.0%} ({n}/{d})" if d else "-"
 
 
-def summarize(run: str, k: int, rows: list[dict]) -> str:
+def summarize(run: str, k: int, method: str, rows: list[dict]) -> str:
     answerable = [r for r in rows if r["question_type"] != NO_DOC_TYPE]
     no_doc = [r for r in rows if r["question_type"] == NO_DOC_TYPE]
     hits = [r for r in answerable if r["hit"]]
@@ -149,7 +150,7 @@ def summarize(run: str, k: int, rows: list[dict]) -> str:
         f"# 평가 결과: {run}",
         "",
         f"- 실행 시각: {datetime.now():%Y-%m-%d %H:%M}",
-        f"- 설정: chunk {CHUNK_SIZE}/{CHUNK_OVERLAP}, Top-K {k}, 컬렉션 `{COLLECTION}`",
+        f"- 설정: 검색 `{method}`, chunk {CHUNK_SIZE}/{CHUNK_OVERLAP}, Top-K {k}, 컬렉션 `{COLLECTION}`",
         f"- 모델: 답변 `{OPENAI_CHAT_MODEL}`, 임베딩 `{OPENAI_EMBEDDING_MODEL}`, 채점 `{OPENAI_JUDGE_MODEL}`",
         f"- 문항: {len(rows)}개 (답변 가능 {len(answerable)}, 문서없음 {len(no_doc)})",
         "",
@@ -196,6 +197,7 @@ def main() -> None:
     parser = argparse.ArgumentParser()
     parser.add_argument("--run", required=True, help="결과 폴더 이름 (예: baseline, hybrid)")
     parser.add_argument("--k", type=int, default=TOP_K)
+    parser.add_argument("--method", choices=METHODS, required=True, help="검색 방식")
     args = parser.parse_args()
 
     with QUESTIONS.open(encoding="utf-8-sig") as f:
@@ -204,7 +206,7 @@ def main() -> None:
     judge = make_judge()
     rows = []
     for q in questions:
-        r = evaluate_one(q, judge, args.k)
+        r = evaluate_one(q, judge, args.k, args.method)
         mark = "-" if r["hit"] == "" else ("O" if r["hit"] else "X")
         print(f"{r['id']} [{r['question_type']}] hit={mark} key={r['key_facts_ok']} judge={r['judge']}")
         rows.append(r)
@@ -215,7 +217,7 @@ def main() -> None:
         writer = csv.DictWriter(f, fieldnames=DETAIL_FIELDS)
         writer.writeheader()
         writer.writerows(rows)
-    (out / "summary.md").write_text(summarize(args.run, args.k, rows), encoding="utf-8")
+    (out / "summary.md").write_text(summarize(args.run, args.k, args.method, rows), encoding="utf-8")
     print(f"\n저장: {out}/details.csv, {out}/summary.md")
 
 
