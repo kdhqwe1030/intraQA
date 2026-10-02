@@ -1,10 +1,10 @@
-"""두 평가 결과를 문항별로 비교해 results/evaluation.md 를 만든다 (교재 14.7).
+"""여러 평가 결과를 비교해 results/evaluation.md 를 만든다 (교재 14.7).
+첫 번째 실행을 기준(Baseline)으로 삼아 나머지의 문항별 변화를 표시한다.
 
-실행: uv run python -m src.eval.compare baseline hybrid
+실행: uv run python -m src.eval.compare baseline hybrid structured structured_hybrid
 """
 import argparse
 import csv
-from pathlib import Path
 
 from src.eval.evaluate import NO_DOC_TYPE, RESULTS_DIR
 
@@ -24,72 +24,75 @@ def change(before: dict, after: dict) -> str:
 def hit_mark(row: dict) -> str:
     if row["question_type"] == NO_DOC_TYPE:
         return "-"
-    return f"O({row['hit_rank']}위)" if row["hit"] == "True" else "X"
+    return f"O({row['hit_rank']})" if row["hit"] == "True" else "X"
+
+
+def pct(n: int, d: int) -> str:
+    return f"{n / d:.0%}" if d else "-"
 
 
 def metrics(rows: dict[str, dict]) -> dict[str, str]:
-    answerable = [r for r in rows.values() if r["question_type"] != NO_DOC_TYPE]
+    all_rows = list(rows.values())
+    answerable = [r for r in all_rows if r["question_type"] != NO_DOC_TYPE]
     n = len(answerable)
     hits = [r for r in answerable if r["hit"] == "True"]
+    cited = [r for r in all_rows if r["citation_ok"] != ""]
     return {
-        "Hit Rate": f"{len(hits) / n:.0%}",
-        "MRR": f"{sum(1 / int(r['hit_rank']) for r in hits) / n:.2f}",
-        "key_facts 통과": f"{sum(r['key_facts_ok'] == 'True' for r in answerable) / n:.0%}",
-        "LLM 채점 정답": f"{sum(r['judge'] == '정답' for r in rows.values()) / len(rows):.0%}",
-        "잘못된 거절": f"{sum(r['refused'] == 'True' for r in answerable) / n:.0%}",
+        "검색 Hit Rate@4": pct(len(hits), n),
+        "검색 MRR": f"{sum(1 / int(r['hit_rank']) for r in hits) / n:.2f}",
+        "key_facts 통과": pct(sum(r["key_facts_ok"] == "True" for r in answerable), n),
+        "출처 조문 정확도": pct(sum(r["citation_ok"] == "True" for r in cited), len(cited)),
+        "LLM 채점 정답": pct(sum(r["judge"] == "정답" for r in all_rows), len(all_rows)),
+        "잘못된 거절": pct(sum(r["refused"] == "True" for r in answerable), n),
     }
 
 
-def build(before_run: str, after_run: str) -> str:
-    before, after = load(before_run), load(after_run)
-    mb, ma = metrics(before), metrics(after)
+def build(runs: list[str]) -> str:
+    data = {run: load(run) for run in runs}
+    base_run, base = runs[0], data[runs[0]]
+    header = "| " + " | ".join(runs) + " |"
+    divider = "|---" * len(runs) + "|"
 
-    lines = [
-        f"# {before_run} vs {after_run}",
-        "",
-        "## 지표",
-        "",
-        f"| 지표 | {before_run} | {after_run} |",
-        "|---|---|---|",
-        *[f"| {k} | {mb[k]} | {ma[k]} |" for k in mb],
-        "",
-        "## 유형별 검색 hit",
-        "",
-        f"| 유형 | {before_run} | {after_run} |",
-        "|---|---|---|",
-    ]
-    types = dict.fromkeys(r["question_type"] for r in before.values() if r["question_type"] != NO_DOC_TYPE)
+    lines = [f"# 평가 비교: {' / '.join(runs)}", "", f"기준: `{base_run}`", "", "## 지표", "",
+             "| 지표 " + header, "|---" + divider]
+    per_run = {run: metrics(rows) for run, rows in data.items()}
+    for name in per_run[base_run]:
+        lines.append(f"| {name} | " + " | ".join(per_run[run][name] for run in runs) + " |")
+
+    lines += ["", "## 유형별 검색 hit", "", "| 유형 " + header, "|---" + divider]
+    types = dict.fromkeys(r["question_type"] for r in base.values() if r["question_type"] != NO_DOC_TYPE)
     for t in types:
-        b = [r for r in before.values() if r["question_type"] == t]
-        a = [r for r in after.values() if r["question_type"] == t]
-        lines.append(f"| {t} | {sum(r['hit'] == 'True' for r in b)}/{len(b)} | {sum(r['hit'] == 'True' for r in a)}/{len(a)} |")
+        cells = []
+        for run in runs:
+            rs = [r for r in data[run].values() if r["question_type"] == t]
+            cells.append(f"{sum(r['hit'] == 'True' for r in rs)}/{len(rs)}")
+        lines.append(f"| {t} | " + " | ".join(cells) + " |")
+
+    lines += ["", f"## {base_run} 대비 변화 (LLM 채점 기준)", "", "| 실행 | 좋아짐 | 동일 | 나빠짐 |", "|---|---|---|---|"]
+    for run in runs[1:]:
+        c = [change(base[q], data[run][q]) for q in base]
+        lines.append(f"| {run} | {c.count('좋아짐')} | {c.count('동일')} | {c.count('나빠짐')} |")
 
     lines += [
-        "",
-        "## 문항별 비교",
-        "",
-        "검색 hit의 순위는 정답 페이지가 몇 번째로 검색됐는지다. 판단은 LLM 채점(정답 > 부분정답 > 오답) 기준이다.",
-        "",
-        f"| ID | 유형 | 질문 | {before_run} 검색 | {after_run} 검색 | 답변 변화 | 판단 |",
-        "|---|---|---|---|---|---|---|",
+        "", "## 문항별 비교", "",
+        "검색 칸은 정답 페이지 hit 여부와 순위, 채점 칸은 LLM 채점 결과다.", "",
+        "| ID | 유형 | 질문 | " + " | ".join(f"{run} 검색 | {run} 채점" for run in runs) + " |",
+        "|---|---|---" + "|---|---" * len(runs) + "|",
     ]
-    for qid, b in before.items():
-        a = after[qid]
-        lines.append(
-            f"| {qid} | {b['question_type']} | {b['question']} | {hit_mark(b)} | {hit_mark(a)} "
-            f"| {b['judge']} → {a['judge']} | {change(b, a)} |"
-        )
-
-    counts = {c: sum(change(before[q], after[q]) == c for q in before) for c in ("좋아짐", "동일", "나빠짐")}
-    lines += ["", f"좋아짐 {counts['좋아짐']} / 동일 {counts['동일']} / 나빠짐 {counts['나빠짐']}"]
+    for qid, b in base.items():
+        cells = []
+        for run in runs:
+            r = data[run][qid]
+            mark = "" if run == base_run else f" ({change(b, r)})"
+            cells.append(f"{hit_mark(r)} | {r['judge']}{mark}")
+        lines.append(f"| {qid} | {b['question_type']} | {b['question']} | " + " | ".join(cells) + " |")
     return "\n".join(lines) + "\n"
 
 
 if __name__ == "__main__":
     parser = argparse.ArgumentParser()
-    parser.add_argument("before")
-    parser.add_argument("after")
+    parser.add_argument("runs", nargs="+", help="비교할 실행 이름. 첫 번째가 기준")
     args = parser.parse_args()
-    out = Path(RESULTS_DIR) / "evaluation.md"
-    out.write_text(build(args.before, args.after), encoding="utf-8")
+    out = RESULTS_DIR / "evaluation.md"
+    out.write_text(build(args.runs), encoding="utf-8")
     print(f"저장: {out}")

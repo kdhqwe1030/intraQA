@@ -5,9 +5,11 @@
   ② key_facts: 답변에 꼭 들어가야 할 값이 모두 있는가
   ③ LLM 채점: 정답 기준과 의미가 맞는가, 검색 문서에 근거하는가
 문서없음 문항은 ①②에서 빼고, 답변을 거절했는지로 판정한다 (교재 14.8).
+추가로 답변이 정답 조문(article_no)을 출처로 인용했는지 기계적으로 확인한다.
 
-실행: uv run python -m src.eval.evaluate --run baseline --method dense
-      uv run python -m src.eval.evaluate --run hybrid --method hybrid
+실행: uv run python -m src.eval.evaluate --pipeline baseline
+      uv run python -m src.eval.evaluate --pipeline structured   (결과 폴더 이름은 기본으로 파이프라인 이름)
+      uv run python -m src.eval.evaluate --pipeline baseline --summary-only   (LLM 호출 없이 details.csv로 요약만 다시 생성)
 """
 import argparse
 import csv
@@ -20,10 +22,10 @@ from langchain_openai import ChatOpenAI
 from pydantic import BaseModel, Field
 
 from src.lib.config import OPENAI_CHAT_MODEL, OPENAI_EMBEDDING_MODEL, OPENAI_JUDGE_MODEL
-from src.lib.store import COLLECTION
-from src.rag.ingest import CHUNK_OVERLAP, CHUNK_SIZE
-from src.rag.rag import NO_ANSWER, ask
-from src.rag.retrieve import METHODS, TOP_K
+from src.rag.chunking import CHUNK_OVERLAP, CHUNK_SIZE, MAX_SECTION
+from src.rag.pipelines import PIPELINES, get_pipeline
+from src.rag.rag import NO_ANSWER, ask, format_context, source_label
+from src.rag.retrieve import TOP_K
 
 QUESTIONS = Path("eval/questions.csv")
 RESULTS_DIR = Path("results")
@@ -31,7 +33,7 @@ NO_DOC_TYPE = "문서없음"
 
 DETAIL_FIELDS = [
     "id", "question_type", "question", "target", "retrieved", "hit", "hit_rank", "other_org",
-    "answer", "key_facts", "key_facts_ok", "refused", "judge", "grounded", "judge_reason",
+    "answer", "key_facts", "key_facts_ok", "article_no", "citation_ok", "refused", "judge", "grounded", "judge_reason",
 ]
 
 
@@ -43,9 +45,11 @@ def target_pages(row: dict) -> set[tuple[str, int]]:
 
 
 def hit_rank(docs, targets: set[tuple[str, int]]) -> int | None:
-    """정답 페이지가 처음 나온 순위 (1부터). 없으면 None."""
+    """정답 페이지가 처음 나온 순위 (1부터). 없으면 None.
+    구조 기반 청크는 여러 페이지에 걸칠 수 있어서, 걸친 페이지 중 하나라도 정답이면 hit로 본다."""
     for rank, d in enumerate(docs, 1):
-        if (d.metadata["rule_name"], d.metadata["page"]) in targets:
+        pages = d.metadata.get("pages") or [d.metadata["page"]]
+        if any((d.metadata["rule_name"], p) in targets for p in pages):
             return rank
     return None
 
@@ -67,6 +71,13 @@ def key_facts_ok(answer: str, key_facts: str) -> bool:
 
 def is_refusal(answer: str) -> bool:
     return NO_ANSWER in answer or "찾을 수 없" in answer
+
+
+def citation_ok(answer: str, article_no: str) -> bool | str:
+    """답변에 정답 조문번호(예: 제13조, 별표3)가 들어 있는가. 조문 라벨이 없거나 거절한 답변은 빈 값."""
+    if not article_no or is_refusal(answer):
+        return ""
+    return re.sub(r"\s", "", article_no) in re.sub(r"\s", "", answer)
 
 
 # ---------- ③ LLM 채점 ----------
@@ -105,13 +116,13 @@ def make_judge():
 
 # ---------- 실행 ----------
 
-def evaluate_one(row: dict, judge, k: int, method: str) -> dict:
-    result = ask(row["question"], row["org"], k=k, method=method)
+def evaluate_one(row: dict, judge, k: int, pipeline: str) -> dict:
+    result = ask(row["question"], row["org"], k=k, pipeline=pipeline)
     docs, answer = result["docs"], result["answer"]
     no_doc = row["question_type"] == NO_DOC_TYPE
 
     rank = None if no_doc else hit_rank(docs, target_pages(row))
-    context = "\n\n".join(f"<{d.metadata['rule_name']} p.{d.metadata['page']}>\n{d.page_content}" for d in docs)
+    context = format_context(docs)
     j = judge.invoke(JUDGE_PROMPT.format(
         question=row["question"], target_answer=row["target_answer"], context=context, answer=answer,
     ))
@@ -120,13 +131,15 @@ def evaluate_one(row: dict, judge, k: int, method: str) -> dict:
         "question_type": row["question_type"],
         "question": row["question"],
         "target": "" if no_doc else f"{Path(row['target_file_name']).stem} p.{row['target_page_no']}",
-        "retrieved": " / ".join(f"{d.metadata['rule_name']} p.{d.metadata['page']}" for d in docs),
+        "retrieved": " / ".join(source_label(d) for d in docs),
         "hit": "" if no_doc else rank is not None,
         "hit_rank": rank or "",
         "other_org": sum(d.metadata["org"] != row["org"] for d in docs),
         "answer": answer,
         "key_facts": row["key_facts"],
         "key_facts_ok": "" if no_doc else key_facts_ok(answer, row["key_facts"]),
+        "article_no": row["article_no"],
+        "citation_ok": citation_ok(answer, row["article_no"]),
         "refused": is_refusal(answer),
         "judge": j.verdict,
         "grounded": j.grounded,
@@ -138,17 +151,19 @@ def pct(n: int, d: int) -> str:
     return f"{n / d:.0%} ({n}/{d})" if d else "-"
 
 
-def summarize(run: str, k: int, method: str, rows: list[dict]) -> str:
+def summarize(run: str, k: int, pipeline: str, rows: list[dict]) -> str:
     answerable = [r for r in rows if r["question_type"] != NO_DOC_TYPE]
     no_doc = [r for r in rows if r["question_type"] == NO_DOC_TYPE]
     hits = [r for r in answerable if r["hit"]]
     mrr = sum(1 / r["hit_rank"] for r in hits) / len(answerable) if answerable else 0
     verdicts = Counter(r["judge"] for r in rows)
+    p = get_pipeline(pipeline)
+    chunking = f"{CHUNK_SIZE}/{CHUNK_OVERLAP}" if p["index"] == "baseline" else f"조문 단위, 최대 {MAX_SECTION}자"
 
     lines = [
         f"# 평가 결과: {run}",
         "",
-        f"- 설정: 검색 `{method}`, chunk {CHUNK_SIZE}/{CHUNK_OVERLAP}, Top-K {k}, 컬렉션 `{COLLECTION}`",
+        f"- 파이프라인: `{pipeline}` (청킹 `{p['index']}` {chunking}, 검색 `{p['retriever']}`, Top-K {k})",
         f"- 모델: 답변 `{OPENAI_CHAT_MODEL}`, 임베딩 `{OPENAI_EMBEDDING_MODEL}`, 채점 `{OPENAI_JUDGE_MODEL}`",
         f"- 문항: {len(rows)}개 (답변 가능 {len(answerable)}, 문서없음 {len(no_doc)})",
         "",
@@ -160,6 +175,7 @@ def summarize(run: str, k: int, method: str, rows: list[dict]) -> str:
         f"| 검색 | MRR | {mrr:.2f} |",
         f"| 검색 | 다른 기관 문서 혼입 | {sum(r['other_org'] for r in rows)}건 |",
         f"| 답변 | key_facts 통과 | {pct(sum(bool(r['key_facts_ok']) for r in answerable), len(answerable))} |",
+        f"| 답변 | 출처 조문 정확도 | {pct(sum(r['citation_ok'] is True for r in rows), sum(r['citation_ok'] != '' for r in rows))} |",
         f"| 답변 | LLM 채점 정답 | {pct(verdicts['정답'], len(rows))} (부분정답 {verdicts['부분정답']}, 오답 {verdicts['오답']}) |",
         f"| 답변 | 근거 충실 (grounded) | {pct(sum(r['grounded'] for r in rows), len(rows))} |",
         f"| 거절 | 문서없음 문항 거절 | {pct(sum(r['refused'] for r in no_doc), len(no_doc))} |",
@@ -191,12 +207,46 @@ def summarize(run: str, k: int, method: str, rows: list[dict]) -> str:
     return "\n".join(lines) + "\n"
 
 
+def load_details(run: str) -> list[dict]:
+    """저장된 details.csv를 읽어 타입을 되살린다. 예전 결과에 없는 citation_ok는 답변으로 다시 계산한다."""
+    with QUESTIONS.open(encoding="utf-8-sig") as f:
+        articles = {q["id"]: q["article_no"] for q in csv.DictReader(f)}
+    to_bool = {"True": True, "False": False, "": ""}
+    with (RESULTS_DIR / run / "details.csv").open(encoding="utf-8-sig") as f:
+        rows = list(csv.DictReader(f))
+    for r in rows:
+        for key in ("hit", "key_facts_ok", "refused", "grounded"):
+            r[key] = to_bool[r[key]]
+        r["hit_rank"] = int(r["hit_rank"]) if r["hit_rank"] else ""
+        r["other_org"] = int(r["other_org"])
+        r["article_no"] = articles[r["id"]]
+        r["citation_ok"] = citation_ok(r["answer"], r["article_no"])
+    return rows
+
+
+def save(run: str, k: int, pipeline: str, rows: list[dict]) -> None:
+    out = RESULTS_DIR / run
+    out.mkdir(parents=True, exist_ok=True)
+    with (out / "details.csv").open("w", encoding="utf-8-sig", newline="") as f:
+        writer = csv.DictWriter(f, fieldnames=DETAIL_FIELDS)
+        writer.writeheader()
+        writer.writerows(rows)
+    (out / "summary.md").write_text(summarize(run, k, pipeline, rows), encoding="utf-8")
+    print(f"저장: {out}/details.csv, {out}/summary.md")
+
+
 def main() -> None:
     parser = argparse.ArgumentParser()
-    parser.add_argument("--run", required=True, help="결과 폴더 이름 (예: baseline, hybrid)")
+    parser.add_argument("--pipeline", choices=PIPELINES, required=True, help="파이프라인 조합 (src/rag/pipelines.py)")
+    parser.add_argument("--run", help="결과 폴더 이름. 생략하면 파이프라인 이름")
     parser.add_argument("--k", type=int, default=TOP_K)
-    parser.add_argument("--method", choices=METHODS, required=True, help="검색 방식")
+    parser.add_argument("--summary-only", action="store_true", help="LLM 호출 없이 기존 details.csv로 요약만 다시 생성")
     args = parser.parse_args()
+    run = args.run or args.pipeline
+
+    if args.summary_only:
+        save(run, args.k, args.pipeline, load_details(run))
+        return
 
     with QUESTIONS.open(encoding="utf-8-sig") as f:
         questions = list(csv.DictReader(f))
@@ -204,19 +254,12 @@ def main() -> None:
     judge = make_judge()
     rows = []
     for q in questions:
-        r = evaluate_one(q, judge, args.k, args.method)
+        r = evaluate_one(q, judge, args.k, args.pipeline)
         mark = "-" if r["hit"] == "" else ("O" if r["hit"] else "X")
         print(f"{r['id']} [{r['question_type']}] hit={mark} key={r['key_facts_ok']} judge={r['judge']}")
         rows.append(r)
 
-    out = RESULTS_DIR / args.run
-    out.mkdir(parents=True, exist_ok=True)
-    with (out / "details.csv").open("w", encoding="utf-8-sig", newline="") as f:
-        writer = csv.DictWriter(f, fieldnames=DETAIL_FIELDS)
-        writer.writeheader()
-        writer.writerows(rows)
-    (out / "summary.md").write_text(summarize(args.run, args.k, args.method, rows), encoding="utf-8")
-    print(f"\n저장: {out}/details.csv, {out}/summary.md")
+    save(run, args.k, args.pipeline, rows)
 
 
 if __name__ == "__main__":
