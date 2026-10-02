@@ -1,6 +1,5 @@
 # 평가 결과: baseline
 
-- 실행 시각: 2026-10-02 14:14
 - 설정: chunk 1000/150, Top-K 4, 컬렉션 `baseline`
 - 모델: 답변 `gpt-4o-mini`, 임베딩 `text-embedding-3-small`, 채점 `gpt-5.4-mini`
 - 문항: 36개 (답변 가능 33, 문서없음 3)

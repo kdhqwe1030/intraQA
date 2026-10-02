@@ -13,7 +13,6 @@ import argparse
 import csv
 import re
 from collections import Counter, defaultdict
-from datetime import datetime
 from pathlib import Path
 from typing import Literal
 
@@ -149,7 +148,6 @@ def summarize(run: str, k: int, method: str, rows: list[dict]) -> str:
     lines = [
         f"# 평가 결과: {run}",
         "",
-        f"- 실행 시각: {datetime.now():%Y-%m-%d %H:%M}",
         f"- 설정: 검색 `{method}`, chunk {CHUNK_SIZE}/{CHUNK_OVERLAP}, Top-K {k}, 컬렉션 `{COLLECTION}`",
         f"- 모델: 답변 `{OPENAI_CHAT_MODEL}`, 임베딩 `{OPENAI_EMBEDDING_MODEL}`, 채점 `{OPENAI_JUDGE_MODEL}`",
         f"- 문항: {len(rows)}개 (답변 가능 {len(answerable)}, 문서없음 {len(no_doc)})",
