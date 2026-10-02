@@ -32,7 +32,7 @@ RESULTS_DIR = Path("results")
 NO_DOC_TYPE = "문서없음"
 
 DETAIL_FIELDS = [
-    "id", "question_type", "question", "target", "retrieved", "hit", "hit_rank", "other_org",
+    "id", "question_type", "question", "target", "retrieved", "hit", "hit_rank",
     "answer", "key_facts", "key_facts_ok", "article_no", "citation_ok", "refused", "judge", "grounded", "judge_reason",
 ]
 
@@ -134,7 +134,6 @@ def evaluate_one(row: dict, judge, k: int, pipeline: str) -> dict:
         "retrieved": " / ".join(source_label(d) for d in docs),
         "hit": "" if no_doc else rank is not None,
         "hit_rank": rank or "",
-        "other_org": sum(d.metadata["org"] != row["org"] for d in docs),
         "answer": answer,
         "key_facts": row["key_facts"],
         "key_facts_ok": "" if no_doc else key_facts_ok(answer, row["key_facts"]),
@@ -173,7 +172,6 @@ def summarize(run: str, k: int, pipeline: str, rows: list[dict]) -> str:
         "|---|---|---|",
         f"| 검색 | Hit Rate@{k} | {pct(len(hits), len(answerable))} |",
         f"| 검색 | MRR | {mrr:.2f} |",
-        f"| 검색 | 다른 기관 문서 혼입 | {sum(r['other_org'] for r in rows)}건 |",
         f"| 답변 | key_facts 통과 | {pct(sum(bool(r['key_facts_ok']) for r in answerable), len(answerable))} |",
         f"| 답변 | 출처 조문 정확도 | {pct(sum(r['citation_ok'] is True for r in rows), sum(r['citation_ok'] != '' for r in rows))} |",
         f"| 답변 | LLM 채점 정답 | {pct(verdicts['정답'], len(rows))} (부분정답 {verdicts['부분정답']}, 오답 {verdicts['오답']}) |",
@@ -218,7 +216,7 @@ def load_details(run: str) -> list[dict]:
         for key in ("hit", "key_facts_ok", "refused", "grounded"):
             r[key] = to_bool[r[key]]
         r["hit_rank"] = int(r["hit_rank"]) if r["hit_rank"] else ""
-        r["other_org"] = int(r["other_org"])
+        r.pop("other_org", None)  # 예전 결과에 있던 열
         r["article_no"] = articles[r["id"]]
         r["citation_ok"] = citation_ok(r["answer"], r["article_no"])
     return rows
