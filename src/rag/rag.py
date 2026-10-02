@@ -1,6 +1,6 @@
 """RAG: 검색 → Prompt → LLM. 답변과 출처(규정명·페이지)를 함께 돌려준다.
 
-실행: uv run python -m src.rag.rag "출장 일비는 얼마인가?" --method hybrid
+실행: uv run python -m src.rag.rag "출장 일비는 얼마인가?" --pipeline structured
 """
 import argparse
 
@@ -10,7 +10,8 @@ from langchain_core.prompts import ChatPromptTemplate
 from langchain_openai import ChatOpenAI
 
 from src.lib.config import OPENAI_CHAT_MODEL
-from src.rag.retrieve import DEFAULT_METHOD, DEFAULT_ORG, METHODS, TOP_K, get_retriever, print_docs
+from src.rag.pipelines import DEFAULT_PIPELINE, PIPELINES, get_pipeline
+from src.rag.retrieve import DEFAULT_ORG, TOP_K, get_retriever, print_docs
 
 NO_ANSWER = "규정에서 근거를 찾을 수 없습니다. 담당 부서에 문의해 주세요."
 
@@ -27,14 +28,22 @@ PROMPT = ChatPromptTemplate.from_messages([
 
 
 def format_context(docs: list[Document]) -> str:
-    return "\n\n".join(
-        f"<{d.metadata['rule_name']} p.{d.metadata['page']}>\n{d.page_content}" for d in docs
-    )
+    return "\n\n".join(f"<{source_label(d)}>\n{d.page_content}" for d in docs)
 
 
-def ask(question: str, org: str, k: int = TOP_K, method: str = DEFAULT_METHOD) -> dict:
+def source_label(d: Document) -> str:
+    """구조 기반 청크는 조문번호와 걸친 페이지까지 출처에 보여준다."""
+    m = d.metadata
+    pages = m.get("pages") or [m["page"]]
+    page = f"p.{pages[0]}" if len(pages) == 1 else f"p.{pages[0]}-{pages[-1]}"
+    article = f" {m['article_no']}" if m.get("article_no") else ""
+    return f"{m['rule_name']}{article} {page}"
+
+
+def ask(question: str, org: str, k: int = TOP_K, pipeline: str = DEFAULT_PIPELINE) -> dict:
     """RAG 진입점. 나중에 FastAPI 엔드포인트도 이 함수를 그대로 부른다 (기획서 9-2)."""
-    docs = get_retriever(org, k, method).invoke(question)
+    p = get_pipeline(pipeline)
+    docs = get_retriever(org, k, method=p["retriever"], index=p["index"]).invoke(question)
     chain = PROMPT | ChatOpenAI(model=OPENAI_CHAT_MODEL, temperature=0) | StrOutputParser()
     answer = chain.invoke({"org": org, "context": format_context(docs), "question": question})
     return {
@@ -52,9 +61,9 @@ def ask(question: str, org: str, k: int = TOP_K, method: str = DEFAULT_METHOD) -
 if __name__ == "__main__":
     parser = argparse.ArgumentParser()
     parser.add_argument("question", nargs="?", default="출장 일비는 얼마인가?")
-    parser.add_argument("--method", choices=METHODS, default=DEFAULT_METHOD)
+    parser.add_argument("--pipeline", choices=PIPELINES, default=DEFAULT_PIPELINE)
     args = parser.parse_args()
-    result = ask(args.question, DEFAULT_ORG, method=args.method)
+    result = ask(args.question, DEFAULT_ORG, pipeline=args.pipeline)
     print("=== 검색 문서")
     print_docs(result["docs"])
     print("\n=== 답변")

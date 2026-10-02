@@ -11,7 +11,6 @@ from langchain_core.documents import Document
 from rank_bm25 import BM25Okapi
 
 from src.lib.config import pg_url
-from src.lib.store import COLLECTION
 
 # 내용어만 남긴다: 명사, 동사·형용사 어간, 어근, 숫자, 외국어
 KEEP_TAGS = ("NNG", "NNP", "NNB", "NR", "VV", "VA", "XR", "SN", "SL")
@@ -27,7 +26,7 @@ def tokenize(text: str) -> list[str]:
     return tokens
 
 
-def load_chunks(org: str) -> list[Document]:
+def load_chunks(org: str, index: str) -> list[Document]:
     sql = """
         SELECT e.document, e.cmetadata
         FROM langchain_pg_embedding e
@@ -36,7 +35,7 @@ def load_chunks(org: str) -> list[Document]:
         ORDER BY (e.cmetadata->>'chunk_id')::int
     """
     with psycopg.connect(pg_url(driver="")) as conn:
-        rows = conn.execute(sql, (COLLECTION, org)).fetchall()
+        rows = conn.execute(sql, (index, org)).fetchall()
     return [Document(page_content=text, metadata=meta) for text, meta in rows]
 
 
@@ -52,9 +51,9 @@ class BM25Index:
 
 
 @lru_cache
-def get_bm25_index(org: str) -> BM25Index:
-    """기관별 인덱스를 한 번만 만들고 재사용한다. 재적재(ingest) 후에는 프로세스를 다시 띄운다."""
-    docs = load_chunks(org)
+def get_bm25_index(org: str, index: str) -> BM25Index:
+    """(기관, 청킹 인덱스)마다 한 번만 만들고 재사용한다. 재적재(ingest) 후에는 프로세스를 다시 띄운다."""
+    docs = load_chunks(org, index)
     if not docs:
-        raise ValueError(f"{org} 청크가 없습니다. 먼저 ingest를 실행하세요.")
+        raise ValueError(f"{org} / {index} 청크가 없습니다. 먼저 ingest --index {index}를 실행하세요.")
     return BM25Index(docs)
