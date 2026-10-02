@@ -33,7 +33,7 @@ NO_DOC_TYPE = "문서없음"
 
 DETAIL_FIELDS = [
     "id", "question_type", "question", "target", "retrieved", "hit", "hit_rank",
-    "answer", "key_facts", "key_facts_ok", "article_no", "citation_ok", "refused", "judge", "grounded", "judge_reason",
+    "law_used", "law_trace", "answer", "key_facts", "key_facts_ok", "article_no", "citation_ok", "refused", "judge", "grounded", "judge_reason",
 ]
 
 
@@ -119,10 +119,11 @@ def make_judge():
 def evaluate_one(row: dict, judge, k: int, pipeline: str) -> dict:
     result = ask(row["question"], row["org"], k=k, pipeline=pipeline)
     docs, answer = result["docs"], result["answer"]
+    law_docs = result.get("law_docs", [])
     no_doc = row["question_type"] == NO_DOC_TYPE
 
     rank = None if no_doc else hit_rank(docs, target_pages(row))
-    context = format_context(docs)
+    context = format_context(docs + law_docs)  # 법령 조문도 채점 근거에 포함해야 grounded를 바르게 판정한다
     j = judge.invoke(JUDGE_PROMPT.format(
         question=row["question"], target_answer=row["target_answer"], context=context, answer=answer,
     ))
@@ -132,6 +133,8 @@ def evaluate_one(row: dict, judge, k: int, pipeline: str) -> dict:
         "question": row["question"],
         "target": "" if no_doc else f"{Path(row['target_file_name']).stem} p.{row['target_page_no']}",
         "retrieved": " / ".join(source_label(d) for d in docs),
+        "law_used": " / ".join(source_label(d) for d in law_docs),
+        "law_trace": "\n".join(result.get("trace", [])),
         "hit": "" if no_doc else rank is not None,
         "hit_rank": rank or "",
         "answer": answer,

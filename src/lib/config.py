@@ -7,6 +7,8 @@ load_dotenv()
 OPENAI_CHAT_MODEL = os.getenv("OPENAI_CHAT_MODEL", "gpt-4o-mini")
 OPENAI_EMBEDDING_MODEL = os.getenv("OPENAI_EMBEDDING_MODEL", "text-embedding-3-small")
 OPENAI_JUDGE_MODEL = os.getenv("OPENAI_JUDGE_MODEL", "gpt-5.4-mini")
+# 법령 재검색의 판단·조문 선택 단계. 여러 문맥을 대조하는 일이라 답변 모델보다 강한 모델을 쓴다
+OPENAI_PLANNER_MODEL = os.getenv("OPENAI_PLANNER_MODEL", "gpt-5.4-mini")
 LAW_OC = os.getenv("LAW_OC", "")
 
 

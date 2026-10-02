@@ -3,6 +3,7 @@
 각 파이프라인은 단계별 모듈을 고른다.
   index     : 청킹 방식이자 벡터 컬렉션 이름 (baseline / structured)
   retriever : 검색 방식 (dense / hybrid)
+  law       : 규정이 법령에 맡긴 내용을 법령 API로 다시 찾는다 (Corrective RAG, 기본 False)
 
 새 개선은 모듈을 추가하고 여기에 조합을 하나 더 등록한다. 평가는 조합 이름으로 실행한다.
 """
@@ -12,6 +13,7 @@ PIPELINES = {
     "hybrid":            {"index": "baseline",   "retriever": "hybrid"},
     "structured":        {"index": "structured", "retriever": "dense"},
     "structured_hybrid": {"index": "structured", "retriever": "hybrid"},
+    "structured_hybrid_law": {"index": "structured", "retriever": "hybrid", "law": True},
 }
 DEFAULT_PIPELINE = "baseline"
 
